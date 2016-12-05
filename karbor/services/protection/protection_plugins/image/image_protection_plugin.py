@@ -78,6 +78,9 @@ class GlanceProtectionPlugin(BaseProtectionPlugin):
         resource_node = kwargs.get("node")
         image_id = resource_node.value.id
         bank_section = checkpoint.get_resource_bank_section(image_id)
+        bank_section.create_object("status",
+                                   constants.RESOURCE_STATUS_AVAILABLE)
+        return
 
         resource_definition = {"resource_id": image_id}
         glance_client = self._glance_client(cntxt)
@@ -151,6 +154,7 @@ class GlanceProtectionPlugin(BaseProtectionPlugin):
                 resource_type=constants.IMAGE_RESOURCE_TYPE)
 
     def restore_backup(self, cntxt, checkpoint, **kwargs):
+        return
         resource_node = kwargs.get('node')
         original_image_id = resource_node.value.id
         heat_template = kwargs.get("heat_template")
@@ -205,6 +209,9 @@ class GlanceProtectionPlugin(BaseProtectionPlugin):
         resource_node = kwargs.get("node")
         image_id = resource_node.value.id
         bank_section = checkpoint.get_resource_bank_section(image_id)
+        bank_section.update_object("status",
+                                   constants.RESOURCE_STATUS_DELETED)
+        return
 
         LOG.info(_LI("deleting image backup failed, image_id: %s."),
                  image_id)

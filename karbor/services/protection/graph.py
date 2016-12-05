@@ -202,8 +202,9 @@ def unpack_graph(packed_graph):
             if child_sid not in graph_nodes_dict:
                 graph_nodes_dict[child_sid] = GraphNode(
                     nodes_dict[child_sid], ())
+                del(nodes_dict[child_sid])
             children.append(graph_nodes_dict[child_sid])
-            del(nodes_dict[child_sid])
+            #del(nodes_dict[child_sid])
         graph_nodes_dict[parent_sid] = GraphNode(nodes_dict[parent_sid],
                                                  tuple(children))
 

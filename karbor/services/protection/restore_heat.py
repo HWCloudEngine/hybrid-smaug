@@ -41,7 +41,7 @@ class HeatResource(object):
 
 
 class HeatTemplate(object):
-    heat_template_version = str(datetime.date(2015, 10, 15))
+    heat_template_version = "2014-10-16"
     description = "karbor restore template"
 
     def __init__(self):

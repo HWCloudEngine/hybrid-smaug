@@ -82,13 +82,13 @@ class KarborKeystonePlugin(object):
             service = self._client.services.list(
                 name=service_name,
                 service_type=service_type,
-                base_url=self._auth_uri)
+                auth_uri=self._auth_uri)
 
             endpoint = self._client.endpoints.list(
                 service=service[0],
                 interface=interface,
                 region_id=region_id,
-                base_url=self._auth_uri)
+                auth_uri=self._auth_uri)
 
             return endpoint[0].url if endpoint else None
 
@@ -155,13 +155,24 @@ class KarborKeystonePlugin(object):
         return auth_plugin
 
     def _get_keystone_client(self, auth_plugin):
-        cafile = cfg.CONF.keystone_authtoken.cafile
+        #cafile = cfg.CONF.keystone_authtoken.cafile
+        username = cfg.CONF.keystone_authtoken.admin_user
+        password = cfg.CONF.keystone_authtoken.admin_password
+        tenant_name = cfg.CONF.keystone_authtoken.admin_tenant_name
+        auth_url = cfg.CONF.keystone_authtoken.auth_uri
+        insecure = cfg.CONF.keystone_authtoken.insecure
         try:
-            l_session = keystone_session.Session(
-                auth=auth_plugin, verify=False if
-                CONF.keystone_authtoken.insecure else cafile)
+            #l_session = keystone_session.Session(
+            #    auth=auth_plugin, verify=False if
+            #    CONF.keystone_authtoken.insecure else cafile)
             return kc_v3.Client(version=KEYSTONECLIENT_VERSION,
-                                session=l_session)
+                                username=username,
+                                tenant_name=tenant_name,
+                                password=password,
+                                auth_url=auth_url,
+                                insecure=insecure)
+            #return kc_v3.Client(version=KEYSTONECLIENT_VERSION,
+            #                    session=l_session)
         except Exception:
-            msg = ('create keystone client failed.cafile:(%s)' % cafile)
+            msg = ('create keystone client failed.')
             raise exception.AuthorizationFailure(obj=msg)

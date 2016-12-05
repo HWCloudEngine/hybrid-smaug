@@ -71,7 +71,8 @@ def create_heat_client_with_auth_url(context, conf, **kwargs):
                                 username=username,
                                 tenant_name=tenant_name,
                                 password=password,
-                                auth_url=auth_url)
+                                auth_url=auth_url,
+                                insecure=insecure)
 
         auth_token = keystone.auth_token
         heat_endpoint = ''
@@ -80,8 +81,9 @@ def create_heat_client_with_auth_url(context, conf, **kwargs):
             if service['name'] == 'heat':
                 endpoints = service['endpoints']
                 for endpoint in endpoints:
-                    if endpoint['interface'] == 'public':
+                    if endpoint['interface'] == 'public' and endpoint['region'] == 'cloud.hybrid':
                         heat_endpoint = endpoint['url']
+                        break
         heat = hc.Client(HEATCLIENT_VERSION, endpoint=heat_endpoint,
                          token=auth_token, cacert=cacert, insecure=insecure)
         return heat
