@@ -154,18 +154,19 @@ class PackGraphWalker(GraphWalkerListener):
         def key_serialize(key):
             return hex(key)
 
-        node_sid = self._sid_counter
-        self._sid_counter += 1
-        self._node_to_sid[node] = node_sid
-        self._sid_to_node[key_serialize(node_sid)] = node.value
+        if node in self._node_to_sid:
+            node_sid = self._sid_counter
+            self._sid_counter += 1
+            self._node_to_sid[node] = node_sid
+            self._sid_to_node[key_serialize(node_sid)] = node.value
 
-        if len(node.child_nodes) > 0:
-            children_sids = map(lambda node:
-                                key_serialize(self._node_to_sid[node]),
-                                node.child_nodes)
-            self._adjacency_list.append(
-                (key_serialize(node_sid), tuple(children_sids))
-            )
+            if len(node.child_nodes) > 0:
+                children_sids = map(lambda node:
+                                    key_serialize(self._node_to_sid[node]),
+                                    node.child_nodes)
+                self._adjacency_list.append(
+                    (key_serialize(node_sid), tuple(children_sids))
+                )
 
 
 def pack_graph(start_nodes):
@@ -202,9 +203,9 @@ def unpack_graph(packed_graph):
             if child_sid not in graph_nodes_dict:
                 graph_nodes_dict[child_sid] = GraphNode(
                     nodes_dict[child_sid], ())
-                del(nodes_dict[child_sid])
             children.append(graph_nodes_dict[child_sid])
-            #del(nodes_dict[child_sid])
+            if child_sid in nodes_dict:
+                del(nodes_dict[child_sid])
         graph_nodes_dict[parent_sid] = GraphNode(nodes_dict[parent_sid],
                                                  tuple(children))
 
