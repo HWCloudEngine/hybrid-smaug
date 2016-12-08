@@ -44,6 +44,12 @@ class VolumeProtectablePlugin(protectable_plugin.ProtectablePlugin):
         return (constants.SERVER_RESOURCE_TYPE,
                 constants.PROJECT_RESOURCE_TYPE)
 
+    def _is_protectable_resource(self, volume):
+        volume_type = getattr(volume, "volume_type")
+        if volume_type is not None and volume_type.split("@")[0] == "hybrid":
+            return True
+        return False
+
     def list_resources(self, context, parameters=None):
         try:
             volumes = self._client(context).volumes.list(detailed=False)
@@ -56,7 +62,7 @@ class VolumeProtectablePlugin(protectable_plugin.ProtectablePlugin):
         else:
             return [resource.Resource(type=self._SUPPORT_RESOURCE_TYPE,
                                       id=vol.id, name=vol.name)
-                    for vol in volumes]
+                    for vol in volumes self._is_protectable_resource(vol)]
 
     def show_resource(self, context, resource_id, parameters=None):
         try:
@@ -91,4 +97,5 @@ class VolumeProtectablePlugin(protectable_plugin.ProtectablePlugin):
         else:
             return [resource.Resource(type=self._SUPPORT_RESOURCE_TYPE,
                                       id=vol.id, name=vol.name)
-                    for vol in volumes if _is_attached_to(vol)]
+                    for vol in volumes if
+                    (self._is_protectable_resource(vol) and _is_attached_to(vol))]
