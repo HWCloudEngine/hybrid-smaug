@@ -431,7 +431,7 @@ class PlansController(wsgi.Controller):
                 msg = _("The key of plan parameters is invalid.")
                 raise exc.HTTPBadRequest(explanation=msg)
             properties = options_schema[resource_type]["properties"]
-            if not set(properties.keys()) > set(parameter_value.keys()):
+            if not set(properties.keys()) >= set(parameter_value.keys()):
                 msg = _("The protect property of plan parameters "
                         "is invalid.")
                 raise exc.HTTPBadRequest(explanation=msg)

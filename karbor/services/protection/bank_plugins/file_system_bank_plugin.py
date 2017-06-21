@@ -36,6 +36,7 @@ LOG = logging.getLogger(__name__)
 
 class FileSystemBankPlugin(BankPlugin):
     """File system bank plugin"""
+
     def __init__(self, config):
         super(FileSystemBankPlugin, self).__init__(config)
         self._config.register_opts(file_system_bank_plugin_opts,
@@ -92,8 +93,8 @@ class FileSystemBankPlugin(BankPlugin):
     def _get_object(self, path):
         obj_file_name = self.object_container_path + path
         if not os.path.isfile(obj_file_name):
-            LOG.exception(_("Object is not a file. name: %s"), obj_file_name)
-            raise
+            LOG.debug(_("Object is not a file. name: %s"), obj_file_name)
+            return None
         try:
             with open(obj_file_name, mode='r') as obj_file:
                 data = obj_file.read()
@@ -106,9 +107,10 @@ class FileSystemBankPlugin(BankPlugin):
         obj_path = self.object_container_path + path.rsplit('/', 1)[0]
         obj_file_name = self.object_container_path + path
         try:
-            os.remove(obj_file_name)
+            if os.path.isfile(obj_file_name):
+                os.remove(obj_file_name)
             if not os.listdir(obj_path) and (
-                    obj_path != self.object_container_path):
+                        obj_path != self.object_container_path):
                 os.rmdir(obj_path)
         except OSError:
             LOG.exception(_("Delete the object failed. name: %s"),
@@ -118,20 +120,18 @@ class FileSystemBankPlugin(BankPlugin):
     def _list_object(self, path):
         obj_file_path = self.object_container_path + path
         if not os.path.isdir(obj_file_path):
-            LOG.exception(_("Path is not a directory. name: %s"),
-                          obj_file_path)
-            raise
+            LOG.debug(_("Path is not a directory. name: %s"), obj_file_path)
+            return []
         try:
             if os.path.isdir(obj_file_path):
-                return os.listdir(obj_file_path)
+                return [path + obj_file
+                        for obj_file in os.listdir(obj_file_path)]
             else:
                 base_dir = os.path.dirname(obj_file_path)
                 base_name = os.path.basename(obj_file_path)
-                return (
-                    base_dir + '/' + obj_file
-                    for obj_file in os.listdir(base_dir)
-                    if obj_file.startswith(base_name)
-                )
+                return [path + '/' + obj_file
+                        for obj_file in os.listdir(base_dir)
+                        if obj_file.startswith(base_name)]
         except OSError:
             LOG.exception(_("List the object failed. path: %s"), obj_file_path)
             raise

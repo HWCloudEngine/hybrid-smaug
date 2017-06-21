@@ -136,6 +136,9 @@ class ProtectOperation(protection_plugin.Operation):
             'share_network_id': share_info.share_network_id
         }
         snapshot_name = parameters.get('snapshot_name', None)
+        if snapshot_name is None:
+            snapshot_name = "karbor-snapshot-share-%s-%s" % (
+                share_id, checkpoint.id)
         description = parameters.get('description', None)
         force = parameters.get('force', False)
         try:
@@ -169,16 +172,17 @@ class RestoreOperation(protection_plugin.Operation):
         bank_section = checkpoint.get_resource_bank_section(original_share_id)
         manila_client = ClientFactory.create_client('manila', context)
         resource_metadata = bank_section.get_object('metadata')
-        restore_name = parameters.get('restore_name',
-                                      '%s@%s' % (checkpoint.id,
-                                                 original_share_id))
+        restore = kwargs.get('restore')
+        restore_name = parameters.get('restore_name', None)
+        if restore_name is None:
+            restore_name = "karbor-restore-share-%s-%s" % (
+                resource.id, restore.id)
         restore_description = parameters.get('restore_description', None)
         snapshot_id = resource_metadata['snapshot_id']
         share_proto = resource_metadata['share_proto']
         size = resource_metadata['size']
         share_type = resource_metadata['share_type']
         share_network_id = resource_metadata['share_network_id']
-        restore = kwargs.get('restore')
         LOG.info("Restoring a share from snapshot, "
                  "original_share_id: %s.", original_share_id)
         try:
@@ -226,11 +230,21 @@ class DeleteOperation(protection_plugin.Operation):
     def on_main(self, checkpoint, resource, context, parameters, **kwargs):
         resource_id = resource.id
         bank_section = checkpoint.get_resource_bank_section(resource_id)
+        try:
+            resource_metadata = bank_section.get_object('metadata')
+            if resource_metadata is None:
+                raise
+        except Exception:
+            bank_section.delete_object('metadata')
+            bank_section.update_object('status',
+                                       constants.RESOURCE_STATUS_DELETED)
+            return
+
         snapshot_id = None
         try:
             bank_section.update_object('status',
                                        constants.RESOURCE_STATUS_DELETING)
-            resource_metadata = bank_section.get_object('metadata')
+
             snapshot_id = resource_metadata['snapshot_id']
             manila_client = ClientFactory.create_client('manila', context)
             try:

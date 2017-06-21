@@ -128,7 +128,8 @@ def get_auth_uri(v3=True):
     # look in [keystone_authtoken]
     if cfg.CONF.clients_keystone.auth_uri:
         discover = ks_discover.Discover(
-            auth_url=cfg.CONF.clients_keystone.auth_uri)
+            auth_url=cfg.CONF.clients_keystone.auth_uri,
+            insecure=cfg.CONF.clients_keystone.insecure)
         return discover.url_for('3.0')
     else:
         # Import auth_token to have keystone_authtoken settings setup.

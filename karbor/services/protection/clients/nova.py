@@ -15,7 +15,6 @@ from oslo_config import cfg
 from oslo_log import log as logging
 
 from karbor.common import config
-from karbor import exception
 from karbor.services.protection.clients import utils
 
 LOG = logging.getLogger(__name__)
@@ -38,6 +37,8 @@ nova_client_opts = [
                 default=False,
                 help='Bypass verification of server certificate when '
                      'making SSL connection to Nova.'),
+    cfg.StrOpt(SERVICE + '_auth_url',
+                help='Nova service auth url.'),
 ]
 
 CONFIG_GROUP = '%s_client' % SERVICE
@@ -59,11 +60,20 @@ def create(context, conf, **kwargs):
     LOG.debug('Creating nova client with url %s.', url)
 
     extensions = nc.discover_extensions(NOVACLIENT_VERSION)
-    session = kwargs.get('session')
-    if session is None:
-        LOG.error('Creating nova client failed with url %s.', url)
-        raise exception.InvalidParameterValue(
-            err="The parameter session is None.")
+    # if kwargs.get('session'):
+    #     return nc.Client(NOVACLIENT_VERSION, extensions=extensions,
+    #                      session=kwargs.get('session'), endpoint_override=url)
+    # else:
+    args = {
+        'project_id': context.project_id,
+        'auth_token': context.auth_token,
+        'extensions': extensions,
+        'cacert': conf.nova_client.nova_ca_cert_file,
+        'insecure': conf.nova_client.nova_auth_insecure,
+        'endpoint_override': url,
+        'auth_url': conf[CONFIG_GROUP].nova_auth_url
+    }
 
-    return nc.Client(NOVACLIENT_VERSION, extensions=extensions,
-                     session=kwargs.get('session'), endpoint_override=url)
+    client = nc.Client(NOVACLIENT_VERSION, **args)
+    return client
+

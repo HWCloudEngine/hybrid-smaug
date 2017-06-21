@@ -24,7 +24,6 @@ import socket
 from oslo_config import cfg
 from oslo_log import log as logging
 
-
 CONF = cfg.CONF
 logging.register_options(CONF)
 
@@ -51,7 +50,7 @@ global_opts = [
                help='The topic that OperationEngine nodes listen on'),
     cfg.StrOpt('operationengine_manager',
                default='karbor.services.operationengine.manager.'
-               'OperationEngineManager',
+                       'OperationEngineManager',
                help='Full class name for the Manager for OperationEngine'),
     cfg.StrOpt('protection_topic',
                default='karbor-protection',
@@ -69,10 +68,13 @@ global_opts = [
                choices=['noauth', 'keystone'],
                help='The strategy to use for auth. Supports noauth or '
                     'keystone.'),
+    cfg.ListOpt('sg_clients',
+                help='The ids of sg client instances.'),
+    cfg.ListOpt('public_availability_zones',
+                help="The availability zones of public clouds")
 ]
 
 CONF.register_opts(global_opts)
-
 
 service_client_opts = [
     cfg.StrOpt('service_name',
@@ -102,7 +104,6 @@ service_client_opts = [
                 help='Bypass verification of server certificate when '
                      'making SSL connection to service.')
 ]
-
 
 keystone_client_opts = [
     cfg.StrOpt('auth_uri',

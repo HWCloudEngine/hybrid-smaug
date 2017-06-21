@@ -73,8 +73,10 @@ class ImageProtectablePlugin(protectable_plugin.ProtectablePlugin):
 
         if not server.image:
             return []
+        else:
+            image_id = server.image['id']
         try:
-            image = self._glance_client(context).images.get(server.image['id'])
+            image = self._glance_client(context).images.get(image_id)
         except Exception as e:
             LOG.exception("Getting image from glance failed.")
             raise exception.ListProtectableResourceFailed(
