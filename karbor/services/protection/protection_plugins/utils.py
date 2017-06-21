@@ -13,6 +13,7 @@
 from oslo_log import log as logging
 from oslo_service import loopingcall
 
+from karbor.exception import InvalidOriginalId
 
 LOG = logging.getLogger(__name__)
 
@@ -46,6 +47,18 @@ def status_poll(get_status_func, interval, success_statuses=set(),
             return
         if ignore_unexpected is False:
             raise loopingcall.LoopingCallDone(retvalue=False)
+
+    loop = loopingcall.FixedIntervalLoopingCall(_poll)
+    return loop.start(interval=interval, initial_delay=interval).wait()
+
+
+def reference_poll(interval, restore_reference, original_id):
+    def _poll():
+        try:
+            restore_reference.get_resource_reference(original_id)
+            raise loopingcall.LoopingCallDone(retvalue=True)
+        except InvalidOriginalId:
+            return
 
     loop = loopingcall.FixedIntervalLoopingCall(_poll)
     return loop.start(interval=interval, initial_delay=interval).wait()
