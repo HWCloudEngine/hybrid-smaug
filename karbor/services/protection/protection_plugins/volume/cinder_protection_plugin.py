@@ -25,7 +25,6 @@ from karbor.services.protection.protection_plugins import utils
 from karbor.services.protection.protection_plugins.volume \
     import volume_plugin_cinder_schemas as cinder_schemas
 
-
 LOG = logging.getLogger(__name__)
 
 cinder_backup_opts = [
@@ -36,7 +35,7 @@ cinder_backup_opts = [
     cfg.BoolOpt(
         'backup_from_snapshot', default=True,
         help='First take a snapshot of the volume, and backup from '
-        'it. Minimizes the time the volume is unavailable.'
+             'it. Minimizes the time the volume is unavailable.'
     ),
 ]
 
@@ -196,47 +195,49 @@ class ProtectOperation(protection_plugin.Operation):
                 resource_type=constants.VOLUME_RESOURCE_TYPE,
             )
 
-        backup_name = parameters.get('backup_name', None)
-        description = parameters.get('description', None)
-        backup_mode = parameters.get('backup_mode', "full")
-        container = parameters.get('container', None)
-        force = parameters.get('force', False)
-        incremental = False
-        if backup_mode == "incremental":
-            incremental = True
-        elif backup_mode == "full":
+        cinder_volume = cinder_client.volumes.get(volume_id)
+        if cinder_volume.bootable.lower() == 'true':
+            image_id = cinder_volume.volume_image_metadata['image_id']
+            resource_metadata['image_id'] = image_id
+            resource_metadata['size'] = cinder_volume.size
+        else:
+            backup_name = parameters.get('backup_name', None)
+            description = parameters.get('description', None)
+            backup_mode = parameters.get('backup_mode', "full")
+            container = parameters.get('container', None)
+            force = parameters.get('force', False)
             incremental = False
+            if backup_mode == "incremental":
+                incremental = True
+            elif backup_mode == "full":
+                incremental = False
 
-        try:
-            backup_id = self._create_backup(cinder_client, volume_id,
-                                            backup_name, description,
-                                            self.snapshot_id,
-                                            incremental, container, force)
-        except Exception as e:
-            LOG.error('Error creating backup (volume_id: %(volume_id)s '
-                      'snapshot_id: %(snapshot_id)s): %(reason)s',
-                      {'volume_id': volume_id,
-                       'snapshot_id': self.snapshot_id,
-                       'reason': e}
-                      )
-            bank_section.update_object('status',
-                                       constants.RESOURCE_STATUS_ERROR)
-            raise exception.CreateBackupFailed(
-                reason=e,
-                resource_id=volume_id,
-                resource_type=constants.VOLUME_RESOURCE_TYPE,
-            )
+            try:
+                backup_id = self._create_backup(cinder_client, volume_id,
+                                                backup_name, description,
+                                                self.snapshot_id,
+                                                incremental, container, force)
+            except Exception as e:
+                LOG.error('Error creating backup (volume_id: %(volume_id)s '
+                          'snapshot_id: %(snapshot_id)s): %(reason)s',
+                          {'volume_id': volume_id,
+                           'snapshot_id': self.snapshot_id,
+                           'reason': e}
+                          )
+                bank_section.update_object('status',
+                                           constants.RESOURCE_STATUS_ERROR)
+                raise exception.CreateBackupFailed(
+                    reason=e,
+                    resource_id=volume_id,
+                    resource_type=constants.VOLUME_RESOURCE_TYPE,
+                )
 
-        resource_metadata['backup_id'] = backup_id
+            resource_metadata['backup_id'] = backup_id
         bank_section.update_object('metadata', resource_metadata)
         bank_section.update_object('status',
                                    constants.RESOURCE_STATUS_AVAILABLE)
-        LOG.info('Backed up volume (volume_id: %(volume_id)s snapshot_id: '
-                 '%(snapshot_id)s backup_id: %(backup_id)s) successfully',
-                 {'backup_id': backup_id,
-                  'snapshot_id': self.snapshot_id,
-                  'volume_id': volume_id}
-                 )
+        LOG.info('Backed up volume (volume_id: %(volume_id)s) successfully',
+                 {'volume_id': volume_id})
 
         if self.snapshot_id:
             try:
@@ -257,23 +258,34 @@ class RestoreOperation(protection_plugin.Operation):
         bank_section = checkpoint.get_resource_bank_section(resource_id)
         resource_metadata = bank_section.get_object('metadata')
         cinder_client = ClientFactory.create_client('cinder', context)
-
+        restore_reference = kwargs.get("restore_reference")
         # create volume
         volume_property = {
             'name': parameters.get(
-                'restore_name',  '%s@%s' % (checkpoint.id, resource_id))
+                'restore_name', '%s@%s' % (checkpoint.id, resource_id))
         }
         if 'restore_description' in parameters:
             volume_property['description'] = parameters['restore_description']
-        backup_id = resource_metadata['backup_id']
+
         try:
-            volume_id = cinder_client.restores.restore(backup_id).volume_id
+            backup_id = resource_metadata.get('backup_id', None)
+            if backup_id:
+                volume_id = cinder_client.restores.restore(backup_id).volume_id
+            else:
+                size = resource_metadata['size']
+                original_image_id = resource_metadata['image_id']
+                utils.reference_poll(
+                    interval=self._interval,
+                    restore_reference=restore_reference,
+                    original_id=original_image_id)
+                image_id = restore_reference.get_resource_reference(
+                    original_image_id)
+                volume = cinder_client.volumes.create(size, imageRef=image_id)
+                volume_id = volume.id
             cinder_client.volumes.update(volume_id, **volume_property)
         except Exception as ex:
-            LOG.error('Error creating volume (backup_id: %(backup_id)s): '
-                      '%(reason)s',
-                      {'backup_id': backup_id,
-                       'reason': ex})
+            LOG.error('Error creating volume %(reason)s',
+                      {'reason': ex})
             raise
 
         # check and update status
@@ -286,7 +298,8 @@ class RestoreOperation(protection_plugin.Operation):
         is_success = self._check_create_complete(cinder_client, volume_id)
         if is_success:
             update_method(constants.RESOURCE_STATUS_AVAILABLE)
-            kwargs.get("heat_template").put_parameter(resource_id, volume_id)
+            kwargs.get("restore_reference").put_resource(
+                resource_id, volume_id)
         else:
             reason = 'Error creating volume'
             update_method(constants.RESOURCE_STATUS_ERROR, reason)
@@ -315,33 +328,44 @@ class DeleteOperation(protection_plugin.Operation):
     def on_main(self, checkpoint, resource, context, parameters, **kwargs):
         resource_id = resource.id
         bank_section = checkpoint.get_resource_bank_section(resource_id)
+        try:
+            resource_metadata = bank_section.get_object('metadata')
+            if resource_metadata is None:
+                raise
+        except Exception:
+            bank_section.delete_object('metadata')
+            bank_section.update_object('status',
+                                       constants.RESOURCE_STATUS_DELETED)
+            return
+
         backup_id = None
         try:
             bank_section.update_object('status',
                                        constants.RESOURCE_STATUS_DELETING)
-            resource_metadata = bank_section.get_object('metadata')
-            backup_id = resource_metadata['backup_id']
+            backup_id = resource_metadata.get('backup_id', None)
             cinder_client = ClientFactory.create_client('cinder', context)
-            try:
-                backup = cinder_client.backups.get(backup_id)
-                cinder_client.backups.delete(backup)
-            except cinder_exc.NotFound:
-                LOG.info('Backup id: %s not found. Assuming deleted',
-                         backup_id)
-            is_success = utils.status_poll(
-                partial(get_backup_status, cinder_client, backup_id),
-                interval=self._interval,
-                success_statuses={'deleted', 'not-found'},
-                failure_statuses={'error', 'error_deleting'},
-                ignore_statuses={'deleting'},
-            )
-            if not is_success:
-                raise exception.NotFound()
+            if backup_id:
+                try:
+                    backup = cinder_client.backups.get(backup_id)
+                    cinder_client.backups.delete(backup)
+                except cinder_exc.NotFound:
+                    LOG.info('Backup id: %s not found. Assuming deleted',
+                             backup_id)
+                is_success = utils.status_poll(
+                    partial(get_backup_status, cinder_client, backup_id),
+                    interval=self._interval,
+                    success_statuses={'deleted', 'not-found'},
+                    failure_statuses={'error', 'error_deleting'},
+                    ignore_statuses={'deleting'},
+                )
+                if not is_success:
+                    raise exception.NotFound()
             bank_section.delete_object('metadata')
             bank_section.update_object('status',
                                        constants.RESOURCE_STATUS_DELETED)
         except Exception as e:
-            LOG.error('delete volume backup failed, backup_id: %s', backup_id)
+            LOG.error('delete volume backup failed, backup_id: %s',
+                      backup_id)
             bank_section.update_object('status',
                                        constants.RESOURCE_STATUS_ERROR)
             raise exception.DeleteBackupFailed(

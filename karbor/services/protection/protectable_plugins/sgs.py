@@ -21,42 +21,31 @@ from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
 
-INVALID_VOLUME_STATUS = ['error', 'deleting', 'error_deleting']
+INVALID_VOLUME_STATUS = ['error', 'disabling', 'deleting', 'error_deleting',
+                         'error_attaching', 'error_detaching']
 
 
-class VolumeProtectablePlugin(protectable_plugin.ProtectablePlugin):
-    """Cinder volume protectable plugin"""
+class SGSVolumeProtectablePlugin(protectable_plugin.ProtectablePlugin):
+    """SGSVolume protectable plugin"""
 
-    _SUPPORT_RESOURCE_TYPE = constants.VOLUME_RESOURCE_TYPE
+    _SUPPORT_RESOURCE_TYPE = constants.SGVOLUME_RESOURCE_TYPE
 
     def _client(self, context):
         self._client_instance = ClientFactory.create_client(
-            "cinder",
+            "sgs",
             context)
-
         return self._client_instance
-
-    def _sgs_client(self, context):
-        return ClientFactory.create_client("sgs", context)
 
     def get_resource_type(self):
         return self._SUPPORT_RESOURCE_TYPE
 
     def get_parent_resource_types(self):
-        return (constants.SERVER_RESOURCE_TYPE,
-                constants.PROJECT_RESOURCE_TYPE)
+        return (constants.PROJECT_RESOURCE_TYPE,
+                constants.SERVER_RESOURCE_TYPE)
 
     def list_resources(self, context, parameters=None):
         try:
-            volumes = self._client(context).volumes.list(detailed=True)
-        except Exception as e:
-            LOG.exception("List all summary volumes from cinder failed.")
-            raise exception.ListProtectableResourceFailed(
-                type=self._SUPPORT_RESOURCE_TYPE,
-                reason=six.text_type(e))
-        try:
-            sgs_volumes = self._sgs_client(context).volumes.list()
-            sgs_volumes_id = [vol.id for vol in sgs_volumes]
+            volumes = self._client(context).volumes.list()
         except Exception as e:
             LOG.exception("List all summary volumes from sgs failed.")
             raise exception.ListProtectableResourceFailed(
@@ -66,16 +55,17 @@ class VolumeProtectablePlugin(protectable_plugin.ProtectablePlugin):
             return [resource.Resource(
                 type=self._SUPPORT_RESOURCE_TYPE,
                 id=vol.id, name=vol.name,
-                extra_info={'availability_zone': vol.availability_zone})
-                for vol in volumes
-                if vol.id not in sgs_volumes_id and
-                vol.status not in INVALID_VOLUME_STATUS]
+                extra_info={'availability_zone': vol.availability_zone,
+                            'replication_zone': vol.replication_zone,
+                            'attachments': vol.attachments})
+                    for vol in volumes
+                    if vol.status not in INVALID_VOLUME_STATUS]
 
     def show_resource(self, context, resource_id, parameters=None):
         try:
             volume = self._client(context).volumes.get(resource_id)
         except Exception as e:
-            LOG.exception("Show a summary volume from cinder failed.")
+            LOG.exception("Show a summary volume from sgs failed.")
             raise exception.ProtectableResourceNotFound(
                 id=resource_id,
                 type=self._SUPPORT_RESOURCE_TYPE,
@@ -88,37 +78,33 @@ class VolumeProtectablePlugin(protectable_plugin.ProtectablePlugin):
             return resource.Resource(
                 type=self._SUPPORT_RESOURCE_TYPE,
                 id=volume.id, name=volume.name,
-                extra_info={'availability_zone': volume.availability_zone})
+                extra_info={'availability_zone': volume.availability_zone,
+                            'replication_zone': volume.replication_zone,
+                            'attachments': volume.attachments})
 
     def get_dependent_resources(self, context, parent_resource):
         def _is_attached_to(vol):
             if parent_resource.type == constants.SERVER_RESOURCE_TYPE:
-                return any([s.get('server_id') == parent_resource.id
-                            for s in vol.attachments])
+                if vol.status == 'in-use':
+                    return (parent_resource.id
+                            == vol.attachments[0]['server_id'])
+                return False
             if parent_resource.type == constants.PROJECT_RESOURCE_TYPE:
-                return getattr(
-                    vol,
-                    'os-vol-tenant-attr:tenant_id'
-                ) == parent_resource.id
+                return getattr(vol,
+                               'os-vol-tenant-attr:tenant_id'
+                               ) == parent_resource.id
 
         try:
-            volumes = self._client(context).volumes.list(detailed=True)
+            volumes = self._client(context).volumes.list()
         except Exception as e:
-            LOG.exception("List all detailed volumes from cinder failed.")
-            raise exception.ListProtectableResourceFailed(
-                type=self._SUPPORT_RESOURCE_TYPE,
-                reason=six.text_type(e))
-        try:
-            sgs_volumes = self._sgs_client(context).volumes.list()
-            sgs_volumes_id = [vol.id for vol in sgs_volumes]
-        except Exception as e:
-            LOG.exception("List all summary volumes from sgs failed.")
+            LOG.exception("List all detailed volumes from sgs failed.")
             raise exception.ListProtectableResourceFailed(
                 type=self._SUPPORT_RESOURCE_TYPE,
                 reason=six.text_type(e))
         else:
             return [resource.Resource(
                 type=self._SUPPORT_RESOURCE_TYPE, id=vol.id, name=vol.name,
-                extra_info={'availability_zone': vol.availability_zone})
-                for vol in volumes
-                if _is_attached_to(vol) and vol.id not in sgs_volumes_id]
+                extra_info={'availability_zone': vol.availability_zone,
+                            'replication_zone': vol.replication_zone,
+                            'attachments': vol.attachments})
+                    for vol in volumes if _is_attached_to(vol)]

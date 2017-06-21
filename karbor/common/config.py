@@ -69,6 +69,9 @@ global_opts = [
                choices=['noauth', 'keystone'],
                help='The strategy to use for auth. Supports noauth or '
                     'keystone.'),
+    cfg.StrOpt('sg_clients',
+               default=None,
+               help='The ids of sg client instances.'),
 ]
 
 CONF.register_opts(global_opts)

@@ -12,6 +12,8 @@
 
 import six
 
+from oslo_config import cfg
+
 from karbor.common import constants
 from karbor import exception
 from karbor import resource
@@ -19,6 +21,7 @@ from karbor.services.protection.client_factory import ClientFactory
 from karbor.services.protection import protectable_plugin
 from oslo_log import log as logging
 
+CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
 
 INVALID_SERVER_STATUS = [
@@ -29,6 +32,11 @@ class ServerProtectablePlugin(protectable_plugin.ProtectablePlugin):
     """Nova server protectable plugin"""
 
     _SUPPORT_RESOURCE_TYPE = constants.SERVER_RESOURCE_TYPE
+
+    def __init__(self, context=None):
+        super(ServerProtectablePlugin, self).__init__(context)
+        if CONF.sg_clients:
+            self._sg_clients = CONF.sg_clients.split(",")
 
     def _client(self, context):
         self._client_instance = ClientFactory.create_client(
@@ -56,7 +64,8 @@ class ServerProtectablePlugin(protectable_plugin.ProtectablePlugin):
                                       id=server.id,
                                       name=server.name)
                     for server in servers
-                    if server.status not in INVALID_SERVER_STATUS]
+                    if server.id not in self._sg_clients
+                    and server.status not in INVALID_SERVER_STATUS]
 
     def show_resource(self, context, resource_id, parameters=None):
         try:
