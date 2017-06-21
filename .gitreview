@@ -1,4 +1,6 @@
 [gerrit]
-host=review.openstack.org
-port=29418
-project=openstack/karbor.git
+host=59.36.10.18
+port=39418
+project=Hybrid-Cloud/hybrid-smaug
+defaultbranch=sgs
+defaultremote=gerrit

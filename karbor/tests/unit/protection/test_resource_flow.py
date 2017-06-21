@@ -18,7 +18,7 @@ from karbor.resource import Resource
 from karbor.services.protection.flows.workflow import TaskFlowEngine
 from karbor.services.protection import graph
 from karbor.services.protection import resource_flow
-from karbor.services.protection import restore_heat
+from karbor.services.protection import restore_reference
 from karbor.tests import base
 from karbor.tests.unit.protection import fakes
 from oslo_config import cfg
@@ -81,7 +81,8 @@ class ResourceFlowTest(base.TestCase):
         for operation in constants.OPERATION_TYPES:
             kwargs = {}
             if operation == constants.OPERATION_RESTORE:
-                kwargs['heat_template'] = restore_heat.HeatTemplate()
+                kwargs['restore_reference'] = \
+                    restore_reference.RestoreReference()
                 kwargs['restore'] = None
             self._walk_operation(mock_protection, operation, **kwargs)
 
@@ -97,7 +98,8 @@ class ResourceFlowTest(base.TestCase):
 
             kwargs = {}
             if operation == constants.OPERATION_RESTORE:
-                kwargs['heat_template'] = restore_heat.HeatTemplate()
+                kwargs['heat_template'] = \
+                    restore_reference.RestoreReference()
                 kwargs['restore'] = None
             self._walk_operation(mock_protection, operation, **kwargs)
 
@@ -135,7 +137,8 @@ class ResourceFlowTest(base.TestCase):
             }
 
             if operation == constants.OPERATION_RESTORE:
-                kwargs['heat_template'] = restore_heat.HeatTemplate()
+                kwargs['heat_template'] = \
+                    restore_reference.RestoreReference()
                 kwargs['restore'] = None
 
             self._walk_operation(mock_protection, operation,

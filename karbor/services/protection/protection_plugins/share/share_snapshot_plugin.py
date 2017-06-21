@@ -226,11 +226,21 @@ class DeleteOperation(protection_plugin.Operation):
     def on_main(self, checkpoint, resource, context, parameters, **kwargs):
         resource_id = resource.id
         bank_section = checkpoint.get_resource_bank_section(resource_id)
+        try:
+            resource_metadata = bank_section.get_object('metadata')
+            if resource_metadata is None:
+                raise
+        except Exception:
+            bank_section.delete_object('metadata')
+            bank_section.update_object('status',
+                                       constants.RESOURCE_STATUS_DELETED)
+            return
+
         snapshot_id = None
         try:
             bank_section.update_object('status',
                                        constants.RESOURCE_STATUS_DELETING)
-            resource_metadata = bank_section.get_object('metadata')
+
             snapshot_id = resource_metadata['snapshot_id']
             manila_client = ClientFactory.create_client('manila', context)
             try:
