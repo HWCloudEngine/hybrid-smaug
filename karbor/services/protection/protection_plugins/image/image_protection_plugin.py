@@ -187,7 +187,7 @@ class RestoreOperation(protection_plugin.Operation):
 
     def on_main(self, checkpoint, resource, context, parameters, **kwargs):
         original_image_id = resource.id
-        heat_template = kwargs.get("heat_template")
+        restore_reference = kwargs.get("restore_reference")
 
         name = parameters.get("restore_name", "karbor-restore-image")
         LOG.info("Restoring image backup, image_id: %s.", original_image_id)
@@ -241,7 +241,7 @@ class RestoreOperation(protection_plugin.Operation):
                     reason=" The checksum of restored image is invalid.",
                     resource_id=original_image_id,
                     resource_type=constants.IMAGE_RESOURCE_TYPE)
-            heat_template.put_parameter(original_image_id, image.id)
+            restore_reference.put_resource(original_image_id, image.id)
         except Exception as e:
             LOG.error("Restore image backup failed, image_id: %s.",
                       original_image_id)
