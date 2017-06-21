@@ -92,8 +92,8 @@ class FileSystemBankPlugin(BankPlugin):
     def _get_object(self, path):
         obj_file_name = self.object_container_path + path
         if not os.path.isfile(obj_file_name):
-            LOG.exception(_("Object is not a file. name: %s"), obj_file_name)
-            raise
+            LOG.debug(_("Object is not a file. name: %s"), obj_file_name)
+            return None
         try:
             with open(obj_file_name, mode='r') as obj_file:
                 data = obj_file.read()
@@ -106,7 +106,8 @@ class FileSystemBankPlugin(BankPlugin):
         obj_path = self.object_container_path + path.rsplit('/', 1)[0]
         obj_file_name = self.object_container_path + path
         try:
-            os.remove(obj_file_name)
+            if os.path.isfile(obj_file_name):
+                os.remove(obj_file_name)
             if not os.listdir(obj_path) and (
                     obj_path != self.object_container_path):
                 os.rmdir(obj_path)
@@ -118,9 +119,8 @@ class FileSystemBankPlugin(BankPlugin):
     def _list_object(self, path):
         obj_file_path = self.object_container_path + path
         if not os.path.isdir(obj_file_path):
-            LOG.exception(_("Path is not a directory. name: %s"),
-                          obj_file_path)
-            raise
+            LOG.debug(_("Path is not a directory. name: %s"), obj_file_path)
+            return ()
         try:
             if os.path.isdir(obj_file_path):
                 return os.listdir(obj_file_path)

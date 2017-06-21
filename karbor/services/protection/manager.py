@@ -214,6 +214,7 @@ class ProtectionManager(manager.Manager):
         if checkpoint.status not in [
             constants.CHECKPOINT_STATUS_AVAILABLE,
             constants.CHECKPOINT_STATUS_ERROR,
+            constants.CHECKPOINT_STATUS_ERROR_DELETING,
         ]:
             raise exception.CheckpointNotBeDeleted(
                 checkpoint_id=checkpoint_id)
