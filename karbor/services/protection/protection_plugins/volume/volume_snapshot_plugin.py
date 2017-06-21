@@ -134,31 +134,35 @@ class ProtectOperation(protection_plugin.Operation):
             'volume_id': volume_id,
             'size': volume_info.size
         }
-        snapshot_name = parameters.get('snapshot_name', None)
-        description = parameters.get('description', None)
-        force = parameters.get('force', False)
-        try:
-            snapshot_id = self._create_snapshot(cinder_client, volume_id,
-                                                snapshot_name,
-                                                description, force)
-        except Exception as e:
-            LOG.error('Error creating snapshot (volume_id: %(volume_id)s '
-                      ': %(reason)s', {'volume_id': volume_id, 'reason': e})
-            bank_section.update_object('status',
-                                       constants.RESOURCE_STATUS_ERROR)
-            raise exception.CreateResourceFailed(
-                name="Volume Snapshot",
-                reason=e, resource_id=volume_id,
-                resource_type=constants.VOLUME_RESOURCE_TYPE,
-            )
+        if volume_info.bootable:
+            image_id = volume_info.volume_image_metadata['image_id']
+            resource_metadata['image_id'] = image_id
+        else:
+            snapshot_name = parameters.get('snapshot_name', None)
+            description = parameters.get('description', None)
+            force = parameters.get('force', False)
+            try:
+                snapshot_id = self._create_snapshot(cinder_client, volume_id,
+                                                    snapshot_name,
+                                                    description, force)
+            except Exception as e:
+                LOG.error('Error creating snapshot (volume_id: %(volume_id)s '
+                          'reason: %(reason)s',
+                          {'volume_id': volume_id, 'reason': e})
+                bank_section.update_object('status',
+                                           constants.RESOURCE_STATUS_ERROR)
+                raise exception.CreateResourceFailed(
+                    name="Volume Snapshot",
+                    reason=e, resource_id=volume_id,
+                    resource_type=constants.VOLUME_RESOURCE_TYPE,
+                )
 
-        resource_metadata['snapshot_id'] = snapshot_id
+            resource_metadata['snapshot_id'] = snapshot_id
         bank_section.update_object('metadata', resource_metadata)
         bank_section.update_object('status',
                                    constants.RESOURCE_STATUS_AVAILABLE)
-        LOG.info('Snapshot volume (volume_id: %(volume_id)s snapshot_id: '
-                 '%(snapshot_id)s ) successfully',
-                 {'volume_id': volume_id, 'snapshot_id': snapshot_id})
+        LOG.info('Snapshot volume (volume_id: %(volume_id)s) successfully',
+                 {'volume_id': volume_id})
 
 
 class RestoreOperation(protection_plugin.Operation):
@@ -175,16 +179,33 @@ class RestoreOperation(protection_plugin.Operation):
                                       'volume-%s@%s' % (checkpoint.id,
                                                         original_volume_id))
         restore_description = parameters.get('restore_description', None)
-        snapshot_id = resource_metadata['snapshot_id']
         size = resource_metadata['size']
-        restore = kwargs.get('restore')
         LOG.info("Restoring a volume from snapshot, "
                  "original_volume_id: %s", original_volume_id)
+        restore_reference = kwargs.get("restore_reference")
         try:
-            volume = cinder_client.volumes.create(
-                size, snapshot_id=snapshot_id,
-                name=restore_name,
-                description=restore_description)
+            snapshot_id = resource_metadata.get('snapshot_id', None)
+            if snapshot_id:
+                volume = cinder_client.volumes.create(
+                    size, snapshot_id=snapshot_id,
+                    name=restore_name,
+                    description=restore_description)
+            else:
+                original_image_id = resource_metadata['image_id']
+                utils.reference_poll(
+                    interval=self._interval,
+                    restore_reference=restore_reference,
+                    original_id=original_image_id)
+                image_id = restore_reference.get_resource_reference(
+                    original_image_id)
+                volume = cinder_client.volumes.create(
+                    size, imageRef=image_id,
+                    name=restore_name,
+                    description=restore_description)
+            update_method = partial(
+                utils.update_resource_restore_result,
+                kwargs.get('restore'), resource.type, volume.id)
+            update_method(constants.RESOURCE_STATUS_RESTORING)
             is_success = utils.status_poll(
                 partial(get_volume_status, cinder_client, volume.id),
                 interval=self._interval,
@@ -193,29 +214,27 @@ class RestoreOperation(protection_plugin.Operation):
                 failure_statuses=VOLUME_FAILURE_STATUSES,
                 ignore_statuses=VOLUME_IGNORE_STATUSES,
             )
-            if is_success is not True:
-                LOG.error('The status of volume is invalid. status:%s',
-                          volume.status)
-                reason = 'Invalid status: %s' % volume.status
-                restore.update_resource_status(
-                    constants.VOLUME_RESOURCE_TYPE,
-                    volume.id, volume.status, reason)
-                restore.save()
+            if is_success:
+                update_method(constants.RESOURCE_STATUS_AVAILABLE)
+                kwargs.get("restore_reference").put_resource(
+                    original_volume_id, volume.id)
+            else:
+                reason = 'Error creating volume'
+                update_method(constants.RESOURCE_STATUS_ERROR, reason)
+
                 raise exception.RestoreResourceFailed(
-                    name="Volume Snapshot",
+                    reason=reason,
                     resource_id=original_volume_id,
-                    resource_type=constants.VOLUME_RESOURCE_TYPE)
-            restore.update_resource_status(constants.VOLUME_RESOURCE_TYPE,
-                                           volume.id, volume.status)
-            restore.save()
+                    resource_type=resource.type
+                )
         except Exception as e:
-            LOG.error("Restore volume from snapshot failed, volume_id: %s",
+            LOG.error("Restore volume failed, volume_id: %s",
                       original_volume_id)
             raise exception.RestoreResourceFailed(
                 name="Volume Snapshot",
                 reason=e, resource_id=original_volume_id,
                 resource_type=constants.VOLUME_RESOURCE_TYPE)
-        LOG.info("Finish restoring a volume from snapshot, volume_id: %s",
+        LOG.info("Finish restoring a volume, volume_id: %s",
                  original_volume_id)
 
 
@@ -227,43 +246,58 @@ class DeleteOperation(protection_plugin.Operation):
     def on_main(self, checkpoint, resource, context, parameters, **kwargs):
         resource_id = resource.id
         bank_section = checkpoint.get_resource_bank_section(resource_id)
-        snapshot_id = None
         try:
-            bank_section.update_object('status',
-                                       constants.RESOURCE_STATUS_DELETING)
             resource_metadata = bank_section.get_object('metadata')
-            snapshot_id = resource_metadata['snapshot_id']
-            cinder_client = ClientFactory.create_client('cinder', context)
-            try:
-                snapshot = cinder_client.volume_snapshots.get(snapshot_id)
-                cinder_client.volume_snapshots.delete(snapshot)
-            except cinder_exc.NotFound:
-                LOG.info('Snapshot id: %s not found. Assuming deleted',
-                         snapshot_id)
-            is_success = utils.status_poll(
-                partial(get_snapshot_status, cinder_client, snapshot_id),
-                interval=self._interval,
-                success_statuses={'deleted', 'not-found'},
-                failure_statuses={'error', 'error_deleting'},
-                ignore_statuses={'deleting'},
-                ignore_unexpected=True
-            )
-            if not is_success:
-                raise exception.NotFound()
+        except Exception:
             bank_section.delete_object('metadata')
             bank_section.update_object('status',
                                        constants.RESOURCE_STATUS_DELETED)
-        except Exception as e:
-            LOG.error('Delete volume snapshot failed, snapshot_id: %s',
-                      snapshot_id)
+            return
+
+        if resource_metadata is not None:
+            snapshot_id = None
+            try:
+                bank_section.update_object('status',
+                                           constants.RESOURCE_STATUS_DELETING)
+                snapshot_id = resource_metadata.get('snapshot_id', None)
+                cinder_client = ClientFactory.create_client('cinder', context)
+                if snapshot_id:
+                    try:
+                        snapshot = cinder_client.volume_snapshots.get(
+                            snapshot_id)
+                        cinder_client.volume_snapshots.delete(snapshot)
+                    except cinder_exc.NotFound:
+                        LOG.info('Snapshot id: %s not found. Assuming deleted',
+                                 snapshot_id)
+                    is_success = utils.status_poll(
+                        partial(get_snapshot_status, cinder_client,
+                                snapshot_id),
+                        interval=self._interval,
+                        success_statuses={'deleted', 'not-found'},
+                        failure_statuses={'error', 'error_deleting'},
+                        ignore_statuses={'deleting'},
+                        ignore_unexpected=True
+                    )
+                    if not is_success:
+                        raise exception.NotFound()
+                bank_section.delete_object('metadata')
+                bank_section.update_object('status',
+                                           constants.RESOURCE_STATUS_DELETED)
+            except Exception as e:
+                LOG.error('Delete volume snapshot failed, snapshot_id: %s',
+                          snapshot_id)
+                bank_section.update_object('status',
+                                           constants.RESOURCE_STATUS_ERROR)
+                raise exception.DeleteResourceFailed(
+                    name="Volume Snapshot",
+                    reason=six.text_type(e),
+                    resource_id=resource_id,
+                    resource_type=constants.VOLUME_RESOURCE_TYPE
+                )
+        else:
+            bank_section.delete_object('metadata')
             bank_section.update_object('status',
-                                       constants.RESOURCE_STATUS_ERROR)
-            raise exception.DeleteResourceFailed(
-                name="Volume Snapshot",
-                reason=six.text_type(e),
-                resource_id=resource_id,
-                resource_type=constants.VOLUME_RESOURCE_TYPE
-            )
+                                       constants.RESOURCE_STATUS_DELETED)
 
 
 class VolumeSnapshotProtectionPlugin(protection_plugin.ProtectionPlugin):

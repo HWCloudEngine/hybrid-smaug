@@ -226,43 +226,56 @@ class DeleteOperation(protection_plugin.Operation):
     def on_main(self, checkpoint, resource, context, parameters, **kwargs):
         resource_id = resource.id
         bank_section = checkpoint.get_resource_bank_section(resource_id)
-        snapshot_id = None
         try:
-            bank_section.update_object('status',
-                                       constants.RESOURCE_STATUS_DELETING)
             resource_metadata = bank_section.get_object('metadata')
-            snapshot_id = resource_metadata['snapshot_id']
-            manila_client = ClientFactory.create_client('manila', context)
-            try:
-                snapshot = manila_client.share_snapshots.get(snapshot_id)
-                manila_client.share_snapshots.delete(snapshot)
-            except manila_exc.NotFound:
-                LOG.info('Snapshot id: %s not found. Assuming deleted',
-                         snapshot_id)
-            is_success = utils.status_poll(
-                partial(get_snapshot_status, manila_client, snapshot_id),
-                interval=self._interval,
-                success_statuses={'deleted', 'not-found'},
-                failure_statuses={'error', 'error_deleting'},
-                ignore_statuses={'deleting'},
-                ignore_unexpected=True
-            )
-            if not is_success:
-                raise exception.NotFound()
+        except Exception:
             bank_section.delete_object('metadata')
             bank_section.update_object('status',
                                        constants.RESOURCE_STATUS_DELETED)
-        except Exception as e:
-            LOG.error('Delete share snapshot failed, snapshot_id: %s',
-                      snapshot_id)
+            return
+
+        if resource_metadata is not None:
+            snapshot_id = None
+            try:
+                bank_section.update_object('status',
+                                           constants.RESOURCE_STATUS_DELETING)
+
+                snapshot_id = resource_metadata['snapshot_id']
+                manila_client = ClientFactory.create_client('manila', context)
+                try:
+                    snapshot = manila_client.share_snapshots.get(snapshot_id)
+                    manila_client.share_snapshots.delete(snapshot)
+                except manila_exc.NotFound:
+                    LOG.info('Snapshot id: %s not found. Assuming deleted',
+                             snapshot_id)
+                is_success = utils.status_poll(
+                    partial(get_snapshot_status, manila_client, snapshot_id),
+                    interval=self._interval,
+                    success_statuses={'deleted', 'not-found'},
+                    failure_statuses={'error', 'error_deleting'},
+                    ignore_statuses={'deleting'},
+                    ignore_unexpected=True
+                )
+                if not is_success:
+                    raise exception.NotFound()
+                bank_section.delete_object('metadata')
+                bank_section.update_object('status',
+                                           constants.RESOURCE_STATUS_DELETED)
+            except Exception as e:
+                LOG.error('Delete share snapshot failed, snapshot_id: %s',
+                          snapshot_id)
+                bank_section.update_object('status',
+                                           constants.RESOURCE_STATUS_ERROR)
+                raise exception.DeleteResourceFailed(
+                    name="Share Snapshot",
+                    reason=six.text_type(e),
+                    resource_id=resource_id,
+                    resource_type=constants.SHARE_RESOURCE_TYPE
+                )
+        else:
+            bank_section.delete_object('metadata')
             bank_section.update_object('status',
-                                       constants.RESOURCE_STATUS_ERROR)
-            raise exception.DeleteResourceFailed(
-                name="Share Snapshot",
-                reason=six.text_type(e),
-                resource_id=resource_id,
-                resource_type=constants.SHARE_RESOURCE_TYPE
-            )
+                                       constants.RESOURCE_STATUS_DELETED)
 
 
 class ManilaSnapshotProtectionPlugin(protection_plugin.ProtectionPlugin):
