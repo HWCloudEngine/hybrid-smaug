@@ -56,7 +56,8 @@ class ServerProtectablePlugin(protectable_plugin.ProtectablePlugin):
                                       id=server.id,
                                       name=server.name)
                     for server in servers
-                    if server.status not in INVALID_SERVER_STATUS]
+                    if 'sg-client' not in server.name
+                    and server.status not in INVALID_SERVER_STATUS]
 
     def show_resource(self, context, resource_id, parameters=None):
         try:
